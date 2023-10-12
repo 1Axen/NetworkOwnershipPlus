@@ -1,2 +1,2 @@
-# OpenSAC
-An open source server-authoritative character controller for ROBLOX written in Luau.
+# NetworkOwnershipPlus
+An open source system built on the concept of Network Ownership from ROBLOX combined with server-authoritative physics.
