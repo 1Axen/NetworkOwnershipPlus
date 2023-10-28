@@ -15,6 +15,10 @@
 --> Thus requiring custom behaviour otherwise you would have issues where Instance.ATTRIBUTE_NAME would result in undefined behaviour
 --> If ATTRIBUTE_NAME was also the name of a child of Instance, should it return the child or the value of the attribute, who knows?
 
+--> SUPER & PARTIAL TYPES
+
+--> PUBLIC TYPES
+
 export type Event = {
     Type: number,
     Frame: number,
@@ -28,6 +32,16 @@ export type Command = Event & {
 
     --> Simulation
     DeltaTime: number,
+}
+
+export type PlayerRecord = {
+    Slot: number,
+    UserId: number,
+    Player: Player,
+    Entities: {Entity},
+
+    --> Replication State
+    SendFullWorldSnapshot: boolean,
 }
 
 export type Component = {
@@ -49,22 +63,26 @@ export type Component = {
 
 export type Entity = {
     Identifier: number,
+    ReplicationState: number,
 
     --> Ownership
-    Owner: Player,
+    Owner: PlayerRecord?,
 
     --> Components
     Components: {Component},
     Simulation: Simulation,
 
-    --> Methods
+    --> Shared methods
     Step: (Entity, DeltaTime: number) -> (),
     Spawn: (Entity, Owner: Player?) -> (),
     SetAngle: (Entity, Angle: Vector3) -> (), 
     SetPosition: (Entity, Position: Vector3) -> (),
-    SetNetworkOwner: (Entity, Owner: Player?) -> (), --> SERVER ONLY
     ProcessEvent: (Entity, Event: Event) -> (),
     Destroy: (Entity) -> (),
+
+    --> Server methods
+    SetNetworkOwner: (Entity, Owner: Player?) -> (),
+    ShouldReplicate: (Entity, Player: Player) -> boolean,
 }
 
 export type Simulation = {
@@ -94,6 +112,12 @@ export type ReplicatedEntity = {
     Deserialize: (ReplicatedEntity, Stream: string) -> (),
     Interpolate: (ReplicatedEntity, Fraction: number) -> (),
     InterpolatePosition: (ReplicatedEntity, Fraction: number) -> (), --> SERVER ONLY
+}
+
+--> This is what you should pass into RegisterEntity
+export type EntityDefinition = {
+    Name: string,
+    CreateEntity: (Angle: Vector3, Position: Vector3) -> Entity,
 }
 
 return {}
