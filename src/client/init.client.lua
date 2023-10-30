@@ -13,24 +13,91 @@ local RunService = game:GetService("RunService")
 
 ---- Imports ----
 
-local NetworkOwnershipPlus = ReplicatedStorage.NetworkOwnershipPlus
+local NetworkOwnershipPlus = require(ReplicatedStorage.NetworkOwnershipPlus)
 
-local Types = require(NetworkOwnershipPlus.Types)
-local Simulation = require(NetworkOwnershipPlus.Simulation)
+local Enums = NetworkOwnershipPlus.Enums
+local CompressionUtility = NetworkOwnershipPlus.Compression
+
+local CharacterCompressionTable = CompressionUtility.CreateCompressionTable({
+    Enums.CompressionTypes.UnsignedByte, --> Identifier [0-255]
+    Enums.CompressionTypes.UnsignedShort, --> Health [0-65535]
+    Enums.CompressionTypes.Vector, --> Position
+    Enums.CompressionTypes.Vector, --> Rotation
+    Enums.CompressionTypes.Vector, --> Velocity
+})
+
+local Character = ReplicatedStorage.Character:Clone()
+local Humanoid: Humanoid = Character.Humanoid
+local RootPart: BasePart = Character.HumanoidRootPart
+RootPart.Anchored = true
+Character.Parent = workspace.CurrentCamera
+
+local CharacterData;
+
+local Gui = game:GetService("StarterGui").Debug
+local Text = Gui.Label
+Gui.Parent = Players.LocalPlayer.PlayerGui
+
+local function FormatVector(Vector: Vector3): string
+    return string.format("%.2f %.2f %.2f", Vector.X, Vector.Y, Vector.Z)
+end
+
+local function Format(Time: number): string
+    local function RoundDecimals(Number: number): string
+        return string.format("%.2f", Number)
+    end
+
+	if Time < 1E-6 then
+		return `{RoundDecimals(Time * 1E+9)} ns`
+	elseif Time < 0.001 then
+		return `{RoundDecimals(Time * 1E+6)} μs`
+	elseif Time < 1 then
+		return `{RoundDecimals(Time * 1000)} ms`
+	else
+		return `{RoundDecimals(Time)} s`
+	end
+end
+
+ReplicatedStorage.Event.OnClientEvent:Connect(function(Stream)
+    local LatestCharacterData, PacketSize = CharacterCompressionTable.Decompress(Stream)
+
+    if CharacterData then
+        CompressionUtility.ReconcileWithDeltaTable(LatestCharacterData, CharacterData)
+    else
+        CharacterData = LatestCharacterData
+    end
+
+    local Health: number = CharacterData[2] :: number
+    local Position: Vector3 = CharacterData[3] :: Vector3
+    local Rotation: Vector3 = CharacterData[4] :: Vector3
+
+    Humanoid.Health = Health
+    RootPart.CFrame = CFrame.new(Position) * CFrame.fromOrientation(Rotation.X, Rotation.Y, Rotation.Z)
+
+    workspace.CurrentCamera.CameraType = Enum.CameraType.Scriptable
+    workspace.CurrentCamera.CFrame = CFrame.new(0, 100, 0) * CFrame.Angles(math.rad(-90), 0, 0)
+
+    Text.Text = `Identifier: {CharacterData[1]}\nHealth: {Health}\nPosition: {FormatVector(Position)}\nRotation: {string.format("%.2f", math.deg(Rotation.Y))}\nVelocity: {CharacterData[5]}\n\nPacket In (bytes): {PacketSize}\nPacket Uncompressed (bytes): {CharacterCompressionTable.Size}`
+end)
+
+
+
+--local Types = require(NetworkOwnershipPlus.Types)
+--local Simulation = require(NetworkOwnershipPlus.Simulation)
 
 ---- Settings ----
 
 ---- Constants ----
 
-local Camera = workspace.CurrentCamera
-local LocalPlayer = Players.LocalPlayer
-local LocalSimulation = Simulation.new(1)
+--local Camera = workspace.CurrentCamera
+--local LocalPlayer = Players.LocalPlayer
+--local LocalSimulation = Simulation.new(1)
 
 ---- Variables ----
 
 ---- Private Functions ----
 
-local ControlModule;
+--[[local ControlModule;
 local function GetControlModule()
     if ControlModule == nil then
         local scripts = LocalPlayer:FindFirstChild("PlayerScripts")
@@ -57,11 +124,11 @@ end
 function CalculateRawMoveVector(CameraRelativeMoveVector: Vector3)
     local _, yaw = Camera.CFrame:ToEulerAnglesYXZ()
     return CFrame.fromEulerAnglesYXZ(0, yaw, 0) * Vector3.new(CameraRelativeMoveVector.X, 0, CameraRelativeMoveVector.Z)
-end
+end]]
 
 ---- Public Functions ----
 
-local function OnPreRender(DeltaTime: number)
+--[[local function OnPreRender(DeltaTime: number)
     ControlModule = GetControlModule()
     if not ControlModule then
         return
@@ -100,10 +167,10 @@ local function OnPreRender(DeltaTime: number)
     --> Camera
     Camera.CameraType = Enum.CameraType.Custom
     Camera.CameraSubject = LocalSimulation.Camera
-end
+end]]
 
 ---- Initialization ----
 
 ---- Connections ----
 
-RunService:BindToRenderStep("Input", Enum.RenderPriority.Input.Value, OnPreRender)
+--RunService:BindToRenderStep("Input", Enum.RenderPriority.Input.Value, OnPreRender)

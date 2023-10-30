@@ -33,6 +33,10 @@ function Math.Friction(Value: number, Friction: number, DeltaTime: number): numb
     return (Value * Ratio)
 end
 
+function Math.RoundTo(Number: number, RoundTo: number)
+    return bit32.band((Number + (RoundTo - 1)), bit32.bnot(RoundTo - 1))
+end
+
 function Math.VectorFriction(Vector: Vector3, Friction: number, DeltaTime: number): Vector3
     local Value = Math.Friction(Vector.Magnitude, Friction, DeltaTime)
     if Value < EPSILON then
