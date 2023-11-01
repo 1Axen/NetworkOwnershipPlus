@@ -24,11 +24,19 @@ local NetworkUtility = require(Utility.Network)
 local MAXIMUM_PLAYERS = 2^8
 local MAXIMUM_ENTITIES = 2^16
 
+local SERVER_UPDATE_RATE = (1 / 20) --> 20 FPS
+
 ---- Constants ----
 
 local Server = {}
 
 ---- Variables ----
+
+local ServerStart = 0
+
+local ServerFrame = 0
+local ServerTimer = 0
+local ServerUpdateTimer = 0
 
 local Slots: {Types.PlayerRecord} = table.create(MAXIMUM_PLAYERS)
 local EntitySlots: {Types.Entity} = table.create(MAXIMUM_ENTITIES)
@@ -201,6 +209,40 @@ local function OnUnreliableEvent(Player: Player, Stream: string, Packet: any)
     end
 end
 
+local function OnPreSimulation(DeltaTime: number)
+    
+end
+
+local function OnPostSimulation(DeltaTime: number)
+    --> Advance timers
+    ServerFrame += 1
+    ServerTimer = os.clock() - ServerStart
+    ServerUpdateTimer += DeltaTime
+
+    --> Step entities
+    for _, Entity in EntitySlots do
+        Entity:Step(DeltaTime)
+    end
+
+    --> Replicate world to players
+    if ServerUpdateTimer >= SERVER_UPDATE_RATE then
+        --> The server might have lagged, and taken extra time to process the last frame
+        --> We account for this by only subtracting the time needed to send one snapshot instead of resetting the timer
+        ServerUpdateTimer -= SERVER_UPDATE_RATE
+
+        for _, PlayerRecord in PlayerRecords do
+            if PlayerRecord.SendFullWorldSnapshot then
+                PlayerRecord.SendFullWorldSnapshot = false
+                NetworkUtility.SendUnreliableEvent(
+                    Enums.NetworkRecipient.Player,
+                    PlayerRecord.Player,
+                    string.pack("B", Enums.SystemEvent.WorldSnapshot)
+                )
+            end
+        end
+    end
+end
+
 ---- Public Functions ----
 
 function Server.CreateEntity(Name: string, Angle: Vector3, Position: Vector3, Owner: Player?, ...): Types.Entity
@@ -309,6 +351,8 @@ function Server.Initialize()
     if Players.MaxPlayers > MAXIMUM_PLAYERS then
         warn(`[WARNING] NetworkOwnershipPlus only supports 256 maximum players, but the server size is {Players.MaxPlayers}. Any excess players will be kicked upon connecting to the server!`)
     end
+
+    ServerStart = os.clock()
 
     Players.PlayerAdded:Connect(OnPlayerAdded)
     Players.PlayerRemoving:Connect(OnPlayerRemoving)

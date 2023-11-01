@@ -81,6 +81,7 @@ export type Entity = {
     Destroy: (Entity) -> (),
 
     --> Server methods
+    Serialize: (Entity) -> ({number | Vector3}),
     SetNetworkOwner: (Entity, Owner: Player?) -> (),
     ShouldReplicate: (Entity, Player: Player) -> boolean,
 }
@@ -90,7 +91,7 @@ export type Simulation = {
     Position: Vector3,
     Velocity: Vector3,
 
-    Replicated: ReplicatedEntity,
+    Rendered: RenderedEntity,
 
     Step: (Simulation, Command: Command) -> (),
     SetAngle: (Entity, Angle: Vector3, Instant: boolean?) -> (), 
@@ -99,7 +100,7 @@ export type Simulation = {
 
 --> Special variation of the entity holding the replicated & rendered data of the entity
 --> Think of "CharacterData" in Chickynoid
-export type ReplicatedEntity = {
+export type RenderedEntity = {
     --> Current
     Angle: Vector3,
     Position: Vector3,
@@ -108,10 +109,7 @@ export type ReplicatedEntity = {
     TargetAngle: Vector3,
     TargetPosition: Vector3,
 
-    Serialize: (ReplicatedEntity) -> string,
-    Deserialize: (ReplicatedEntity, Stream: string) -> (),
-    Interpolate: (ReplicatedEntity, Fraction: number) -> (),
-    InterpolatePosition: (ReplicatedEntity, Fraction: number) -> (), --> SERVER ONLY
+    Interpolate: (RenderedEntity, Fraction: number) -> (),
 }
 
 --> This is what you should pass into RegisterEntity

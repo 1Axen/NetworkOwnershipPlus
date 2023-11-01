@@ -31,18 +31,5 @@ return {
     ConnectionType = {
         Reliable = 1,
         Unreliable = 2
-    },
-
-    CompressionTypes = {
-        Byte = "b",
-        Float = "f",
-        Short = "h",
-        Double = "d",
-        Number = "n",
-        Vector = "fff",
-        Integer = "j",
-        UnsignedByte = "B",
-        UnsignedShort = "H",
-        UnsignedInteger = "J"
     }
 }
