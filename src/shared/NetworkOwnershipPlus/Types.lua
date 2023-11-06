@@ -15,6 +15,15 @@
 --> Thus requiring custom behaviour otherwise you would have issues where Instance.ATTRIBUTE_NAME would result in undefined behaviour
 --> If ATTRIBUTE_NAME was also the name of a child of Instance, should it return the child or the value of the attribute, who knows?
 
+---- Imports ----
+
+local Package = script.Parent
+local Utility = Package.Utility
+
+local CompressionUtility = require(Utility.Compression)
+
+---- Types ----
+
 --> SUPER & PARTIAL TYPES
 
 --> PUBLIC TYPES
@@ -34,11 +43,18 @@ export type Command = Event & {
     DeltaTime: number,
 }
 
+type ReplicationRecord = {
+    Frame: number,
+    Layout: any,
+}
+
 export type PlayerRecord = {
     Slot: number,
     UserId: number,
     Player: Player,
+
     Entities: {Entity},
+    Replication: {[number]: ReplicationRecord},
 
     --> Replication State
     SendFullWorldSnapshot: boolean,
@@ -64,6 +80,7 @@ export type Component = {
 export type Entity = {
     Identifier: number,
     ReplicationState: number,
+    CompressionTable: CompressionUtility.CompressionTable,
 
     --> Ownership
     Owner: PlayerRecord?,
@@ -81,9 +98,9 @@ export type Entity = {
     Destroy: (Entity) -> (),
 
     --> Server methods
-    Serialize: (Entity) -> ({number | Vector3}),
+    Serialize: (Entity) -> CompressionUtility.SupportedValuesLayout,
     SetNetworkOwner: (Entity, Owner: Player?) -> (),
-    ShouldReplicate: (Entity, Player: Player) -> boolean,
+    ShouldReplicate: (Entity, Player: PlayerRecord) -> boolean,
 }
 
 export type Simulation = {

@@ -11,14 +11,21 @@
 ---- Settings ----
 
 type BaseValues = number | Vector3 | boolean | string
+type ValuesLayout = {[string | number]: BaseValues}
+export type SupportedValuesLayout = {[string | number]: SupportedValues}
+
 export type ValueWrapper = () -> (BaseValues)
 export type SupportedValues = BaseValues & ValueWrapper
+export type CompressionTable = {
+    Size: number,
+    Compress: (Values: SupportedValuesLayout,       DeltaValues: SupportedValuesLayout?) -> string,
+    Decompress: (Stream: string) -> (ValuesLayout)
+}
 
 local TRUE = 0b1
 local FALSE = 0b0
 local NAN = 0/0
 local NAN_VECTOR = Vector3.new(NAN, NAN, NAN)
-local EMPTY_STRING = ""
 
 local COMPRESSION_TYPES = {
     Byte = "b",
@@ -34,6 +41,8 @@ local COMPRESSION_TYPES = {
     UnsignedShort = "H",
     UnsignedInteger = "J"
 }
+
+local VARIABLE_SIZE_INTEGER = "I%d"
 
 local UNFORMATTABLE_TYPES = {
     COMPRESSION_TYPES.String,
@@ -55,15 +64,8 @@ local function GetSubstituteType(Value: BaseValues): BaseValues
 end
 
 local function GetVariableLengthFormat(Size: number): string
-    if Size == 0 then
-        return EMPTY_STRING
-    elseif Size <= 8 then
-        return COMPRESSION_TYPES.UnsignedByte
-    elseif Size <= 16 then
-        return COMPRESSION_TYPES.UnsignedShort
-    end
-    
-    return COMPRESSION_TYPES.UnsignedInteger
+    local Bytes = math.ceil(Size / 8)
+    return string.format(VARIABLE_SIZE_INTEGER, Bytes)
 end
 
 ---- Public Functions ----
@@ -98,7 +100,7 @@ function Utility.ReconcileWithDeltaTable(DeltaTable: {BaseValues}, BaseTable: {B
     end
 end
 
-function Utility.CreateCompressionTable(Types: {string}, Dictionary: {string}?)
+function Utility.CreateCompressionTable(Types: {string}, Dictionary: {string}?): CompressionTable
     --> Validation
     if #Types == 0 then
         error("Types is empty!")
@@ -155,17 +157,17 @@ function Utility.CreateCompressionTable(Types: {string}, Dictionary: {string}?)
     return {
         Size = string.packsize(DeltaFormat .. GetVariableLengthFormat(#Booleans) .. Format),
 
-        Compress = function(Values: {[string | number]: SupportedValues}, PreviousValues: {[string | number]: BaseValues}): (string)
+        Compress = function(Values: SupportedValuesLayout, DeltaValues: SupportedValuesLayout?): (string)
             local Stream = ""
             local StreamFormat = ""
-            local ChangedValues: {BaseValues} = table.create(#Values)
+            local ChangedValues: {BaseValues} = table.create(#Values) 
+            local PreviousValues: {BaseValues} = table.create(#Values)
 
                         --> Convert to array if it's a dictionary
             --> NOTE: You can pass either an array or dictionary and as long as they have the same layout they should work
             if Dictionary and (#Values == 0) then
                 --> Avoid mutating user input                
                 local ValuesArray = table.create(#Dictionary)
-                local PreviousValuesArray = PreviousValues and table.create(#Dictionary)
 
                 --> Change keys to indexes
                 for Key, Value in Values :: {[string]: SupportedValues} do
@@ -180,13 +182,12 @@ function Utility.CreateCompressionTable(Types: {string}, Dictionary: {string}?)
                     ValuesArray[Index] = Value
 
                     --> Also convert previous values dictionary
-                    if PreviousValuesArray then
-                        PreviousValuesArray[Index] = PreviousValues[Key]
+                    if DeltaValues then
+                        PreviousValues[Index] = DeltaValues[Key]
                     end
                 end
 
                 Values = ValuesArray
-                PreviousValues = PreviousValuesArray
             end
 
             --> Remove wrappers
@@ -194,15 +195,14 @@ function Utility.CreateCompressionTable(Types: {string}, Dictionary: {string}?)
                 if type(Value) == "function" then
                     local Raw = Value()
                     Values[Index] = Raw
-                    if PreviousValues then
-                        PreviousValues[Index] = GetSubstituteType(Raw)
+                    if DeltaValues then
+                        table.insert(PreviousValues, GetSubstituteType(Raw))
                     end 
                 end
             end
 
             --> Create fake delta values
-            if not PreviousValues then
-                PreviousValues = table.create(#Values)
+            if not DeltaValues then
                 for Index, Value in Values do
                     (PreviousValues :: any)[Index] = GetSubstituteType(Value)
                 end
@@ -218,7 +218,7 @@ function Utility.CreateCompressionTable(Types: {string}, Dictionary: {string}?)
 
             for Index, RawCurrent in Values do
                 local Current: BaseValues = RawCurrent
-                local Previous = PreviousValues[Index]
+                local Previous = (PreviousValues :: ValuesLayout)[Index]
                 local HasValueChanged = (Current ~= Previous)
 
                 if type(Current) == "vector" then
@@ -290,12 +290,12 @@ function Utility.CreateCompressionTable(Types: {string}, Dictionary: {string}?)
             return Stream
         end,
 
-        Decompress = function(Stream: string): ({[string | number]: BaseValues})
+        Decompress = function(Stream: string): (ValuesLayout)
             local StreamFormat = ""
             local BooleanFormat = ""
             local BooleanFormatOffset = 0
 
-            local Values: {[string | number]: BaseValues} = table.create(#Types, NAN)
+            local Values: ValuesLayout = table.create(#Types, NAN)
             local ValueIndices: {number} = {}
             local VectorIndices: {number} = {}
             local BooleanIndices: {number} = {}

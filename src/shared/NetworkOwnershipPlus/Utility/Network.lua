@@ -21,13 +21,13 @@ local FOLDER_NAME = "_CONNECTIONS"
 
 local Utility = {}
 local ReliableConnection: RemoteEvent;
-local UnreliableConnection: RemoteEvent;
+local UnreliableConnection: UnreliableRemoteEvent;
 
 ---- Variables ----
 
 ---- Private Functions ----
 
-local function SendEvent(Connection: RemoteEvent, Recipient: number, ...)
+local function SendEvent(Connection: BaseRemoteEvent, Recipient: number, ...)
     if Recipient == Enums.NetworkRecipient.Server then
         Connection:FireServer(...)
     elseif Recipient == Enums.NetworkRecipient.Player then
@@ -46,7 +46,7 @@ local function InitializeServerConnections()
     ReliableConnection.Name = "Reliable"
     ReliableConnection.Parent = Events
 
-    UnreliableConnection = Instance.new("RemoteEvent")
+    UnreliableConnection = Instance.new("UnreliableRemoteEvent")
     UnreliableConnection.Name = "Unreliable"
     UnreliableConnection.Parent = Events
 
@@ -70,7 +70,7 @@ function Utility.SendUnreliableEvent(Recipient: number, ...)
 end
 
 function Utility.SetupConnection(Reliability: number, Callback: (...any) -> ()): RBXScriptConnection
-    local Connection: RemoteEvent;
+    local Connection: BaseRemoteEvent;
     if Reliability == Enums.ConnectionType.Reliable then
         Connection = ReliableConnection
     elseif Reliability == Enums.ConnectionType.Unreliable then

@@ -18,11 +18,15 @@ local Utility = Package.Utility
 local Types = require(Package.Types)
 local Enums = require(Package.Enums)
 local NetworkUtility = require(Utility.Network)
+local CompressionUtility = require(Utility.Compression)
 
 ---- Settings ----
 
 local MAXIMUM_PLAYERS = 2^8
 local MAXIMUM_ENTITIES = 2^16
+
+local MAXIMUM_FIELD_OF_VIEW = math.rad(120)
+local MAXIMUM_VISIBILITY_DISTANCE = 2000
 
 local SERVER_UPDATE_RATE = (1 / 20) --> 20 FPS
 
@@ -44,7 +48,71 @@ local EntitySlots: {Types.Entity} = table.create(MAXIMUM_ENTITIES)
 local PlayerRecords: {[number]: Types.PlayerRecord} = {}
 local EntityDefinitions: {[string]: Types.EntityDefinition} = {}
 
+local SnapshotCompressedTable = CompressionUtility.CreateCompressionTable({
+    CompressionUtility.CompressionTypes.Byte,
+    CompressionUtility.CompressionTypes.UnsignedInteger,
+    CompressionUtility.CompressionTypes.Double,
+    CompressionUtility.CompressionTypes.String
+}, {
+    "Event",
+    "Frame",
+    "Timestamp",
+    "Stream"
+})
+
 ---- Private Functions ----
+
+local function BuildSnapshot(PlayerRecord: Types.PlayerRecord): string
+    local Snapshot = ""
+
+    for _, Entity in EntitySlots do
+        if Entity.ReplicationState == Enums.ReplicationState.DontSend then
+            continue
+        elseif Entity.ReplicationState == Enums.ReplicationState.Manual then
+            if not Entity:ShouldReplicate(PlayerRecord) then
+                continue
+            end
+        elseif Entity.ReplicationState == Enums.ReplicationState.OnlyVisible then
+            local PrimaryEntity = PlayerRecord.Entities[1]
+            if not PrimaryEntity then
+                continue
+            end
+
+            local Direction = PrimaryEntity.Simulation.Position - Entity.Simulation.Position
+            local Angle = PrimaryEntity.Simulation.Angle:Dot(Direction)
+            if Angle > MAXIMUM_FIELD_OF_VIEW or Direction.Magnitude > MAXIMUM_VISIBILITY_DISTANCE then
+                continue
+            end
+        end
+
+        local Identifier = Entity.Identifier
+        local EntitySerialized: CompressionUtility.SupportedValuesLayout = Entity:Serialize()
+        local ReplicationRecord = PlayerRecord.Replication[Identifier]
+
+        PlayerRecord.Replication[Identifier] = {
+            Frame = ServerFrame,
+            Layout = EntitySerialized
+        }
+
+        --> Should we send a full snapshot or a delta one?
+        local Stream: string;
+        if not ReplicationRecord or (ServerFrame - ReplicationRecord.Frame) > 1 or PlayerRecord.SendFullWorldSnapshot then
+            Stream = Entity.CompressionTable.Compress(EntitySerialized)
+        else
+            Stream = Entity.CompressionTable.Compress(EntitySerialized, ReplicationRecord.Layout)
+        end
+
+        --> Add stream & entity terminator
+        Snapshot ..= Stream .. "\0"
+    end
+
+    return SnapshotCompressedTable.Compress({
+        Event = Enums.SystemEvent.WorldSnapshot,
+        Frame = ServerFrame,
+        Timestamp = ServerTimer,
+        Snapshot = Snapshot
+    })
+end
 
 local function OnPlayerAdded(Player: Player)
     local PlayerRecord = {
@@ -231,14 +299,11 @@ local function OnPostSimulation(DeltaTime: number)
         ServerUpdateTimer -= SERVER_UPDATE_RATE
 
         for _, PlayerRecord in PlayerRecords do
-            if PlayerRecord.SendFullWorldSnapshot then
-                PlayerRecord.SendFullWorldSnapshot = false
-                NetworkUtility.SendUnreliableEvent(
-                    Enums.NetworkRecipient.Player,
-                    PlayerRecord.Player,
-                    string.pack("B", Enums.SystemEvent.WorldSnapshot)
-                )
-            end
+            NetworkUtility.SendUnreliableEvent(
+                Enums.NetworkRecipient.Player, 
+                PlayerRecord.Player, 
+                BuildSnapshot(PlayerRecord)
+            )
         end
     end
 end
@@ -356,6 +421,9 @@ function Server.Initialize()
 
     Players.PlayerAdded:Connect(OnPlayerAdded)
     Players.PlayerRemoving:Connect(OnPlayerRemoving)
+
+    RunService.PreSimulation:Connect(OnPreSimulation)
+    RunService.PostSimulation:Connect(OnPostSimulation)
 
     NetworkUtility.SetupConnection(Enums.ConnectionType.Reliable, OnReliableEvent)
     NetworkUtility.SetupConnection(Enums.ConnectionType.Unreliable, OnUnreliableEvent)    
