@@ -127,13 +127,22 @@ function Buffer.new(Stream: string)
         
     end
 
+    function BufferInstance.WriteBytes(Value: number, Bytes: number)
+        for Index = 0, (Bytes - 1) do
+            local Byte = bit32.extract(Value, Index * 8, 8)
+            BufferInstance.WriteByte(Byte)
+        end
+    end
+
     function BufferInstance.WriteVector(Vector: Vector3)
         BufferInstance.WriteFloat(Vector.X)
         BufferInstance.WriteFloat(Vector.Y)
         BufferInstance.WriteFloat(Vector.Z)
     end
 
+    -- selene: allow(shadowing)
     function BufferInstance.WriteString(String: string, Length: number?)
+        local Length = Length or string.len(String)
         
     end
 

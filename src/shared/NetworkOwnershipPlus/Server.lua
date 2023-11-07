@@ -128,10 +128,15 @@ local function OnPlayerAdded(Player: Player)
     PlayerRecords[Player.UserId] = PlayerRecord
 
     --> Replicate initial state
+    local EventBuffer = Buffer.new("")
+    EventBuffer.WriteByte(Enums.SystemEvent.Initialize)
+    EventBuffer.WriteDouble(SERVER_UPDATE_RATE)
+    EventBuffer.WriteDouble(ServerTimer)
+
     Network.SendReliableEvent(
         Enums.NetworkRecipient.Player, 
         Player, 
-        string.pack("B", Enums.SystemEvent.Initialize),
+        EventBuffer,
         Slots
     )
 end
@@ -182,7 +187,7 @@ local function OnReliableEvent(Player: Player, Stream: string, Packet: any)
             return
         end
 
-        Entity:ProcessEvent({
+        Entity:ServerProcessEvent({
             Type = Enums.EntityEvent.Custom,
             Frame = Frame,
             Packet = Packet
@@ -216,17 +221,17 @@ local function OnUnreliableEvent(Player: Player, Stream: string, Packet: any)
         end
 
         if EventType == Enums.EntityEvent.Custom then
-            Entity:ProcessEvent({
+            Entity:ServerProcessEvent({
                 Type = Enums.EntityEvent.Custom,
                 Frame = Frame,
                 Packet = Packet
             })
-        elseif EventType == Enums.EntityEvent.Command then
+        elseif EventType == Enums.EntityEvent.Movement then
             local Movement = StreamBuffer.ReadUnsignedByte()
             local DeltaTime = StreamBuffer.ReadDouble()
 
-            Entity:ProcessEvent({
-                Type = Enums.EntityEvent.Custom,
+            Entity:ServerProcessEvent({
+                Type = Enums.EntityEvent.Movement,
                 Frame = Frame,
                 Packet = Packet,
                 DeltaTime = DeltaTime,
@@ -249,9 +254,13 @@ local function OnPostSimulation(DeltaTime: number)
     ServerTimer = os.clock() - ServerStart
     ServerUpdateTimer += DeltaTime
 
-    --> Step entities
+    --> Step entities & components
     for _, Entity in EntitySlots do
-        Entity:Step(DeltaTime)
+        for _, Component in Entity.Components do
+            Component:ServerStep(DeltaTime)
+        end
+
+        Entity:ServerStep(DeltaTime)
     end
 
     --> Replicate world to players
@@ -303,18 +312,6 @@ function Server.CreateEntity(Name: string, Angle: Vector3, Position: Vector3, Ow
     Entity.Identifier = Identifier
     EntitySlots[Identifier] = Entity
 
-    --> Replicate entity creation
-    Network.SendReliableEvent(
-        Enums.NetworkRecipient.AllPlayers, 
-        string.pack(
-            "BH", 
-            Enums.SystemEvent.CreateEntity, 
-            Entity.Identifier
-        ),
-        Angle,
-        Position
-    )
-
     --> Assign network ownership
     if Owner then
         Server.SetEntityNetworkOwner(Entity, Owner)
@@ -343,7 +340,7 @@ function Server.DestroyEntity(Entity: Types.Entity)
         )
     
     --> Call entity destroy
-    Entity:Destroy()
+    Entity:ServerDestroy()
 end
 
 function Server.RegisterEntity(Definition: Types.EntityDefinition)

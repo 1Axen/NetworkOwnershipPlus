@@ -12,10 +12,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 ---- Imports ----
 
 local Package = script.Parent.Parent
-local UtilityModules = Package.Utility
-
 local Enums = require(Package.Enums)
-local CompressionUtility = require(UtilityModules.Compression)
 
 ---- Settings ----
 

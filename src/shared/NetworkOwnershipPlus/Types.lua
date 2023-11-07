@@ -31,6 +31,7 @@ local CompressionUtility = require(Utility.Compression)
 export type Event = {
     Type: number,
     Frame: number,
+    Player: PlayerRecord?,
 }
 
 export type Command = Event & {
@@ -90,14 +91,20 @@ export type Entity = {
     Simulation: Simulation,
 
     --> Shared methods
-    Step: (Entity, DeltaTime: number) -> (),
-    Spawn: (Entity, Owner: Player?) -> (),
     SetAngle: (Entity, Angle: Vector3) -> (), 
     SetPosition: (Entity, Position: Vector3) -> (),
-    ProcessEvent: (Entity, Event: Event) -> (),
-    Destroy: (Entity) -> (),
+
+    --> Client methods
+    ClientStep: (Entity, DeltaTime: number) -> (),
+    ClientProcessEvent: (Entity, Event: Event) -> (),
+    ClientDestroy: (Entity) -> (),
 
     --> Server methods
+    ServerStep: (Entity, DeltaTime: number) -> (),
+    ServerProcessEvent: (Entity, Event: Event) -> (),
+    ServerDestroy: (Entity) -> (),
+
+    --> Server network methods
     Serialize: (Entity) -> CompressionUtility.SupportedValuesLayout,
     SetNetworkOwner: (Entity, Owner: Player?) -> (),
     ShouldReplicate: (Entity, Player: PlayerRecord) -> boolean,

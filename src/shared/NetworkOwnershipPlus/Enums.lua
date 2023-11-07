@@ -14,7 +14,7 @@ return {
 
     SystemEvent = {
         Initialize = 0,
-        CreateEntity = 1,
+        --CreateEntity = 1,
         DestroyEntity = 2,
         WorldSnapshot = 3,
         AssignOwnership = 4,
@@ -24,7 +24,7 @@ return {
     },
 
     EntityEvent = {
-        Command = 1,
+        Movement = 1,
         Custom = 2,
     },
 
