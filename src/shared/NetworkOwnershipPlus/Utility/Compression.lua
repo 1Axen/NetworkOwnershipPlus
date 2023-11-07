@@ -52,7 +52,7 @@ local UNFORMATTABLE_TYPES = {
 ---- Constants ----
 
 local Utility = {
-    CompressionTypes = COMPRESSION_TYPES
+    Types = COMPRESSION_TYPES
 }
 
 ---- Variables ----
@@ -64,6 +64,10 @@ local function GetSubstituteType(Value: BaseValues): BaseValues
 end
 
 local function GetVariableLengthFormat(Size: number): string
+    if Size == 0 then
+        return ""
+    end
+
     local Bytes = math.ceil(Size / 8)
     return string.format(VARIABLE_SIZE_INTEGER, Bytes)
 end
@@ -175,7 +179,7 @@ function Utility.CreateCompressionTable(Types: {string}, Dictionary: {string}?):
 
                     --> Unknown key, alert the user!
                     if not Index then
-                        warn(`Unknown key "{Key}" in dictionary passed to CompressionTable.Compress!`)
+                        warn(`Unknown key "{Key}" in dictionary passed to CompressionTable.Compress!\n{debug.traceback()}`)
                         continue
                     end
 

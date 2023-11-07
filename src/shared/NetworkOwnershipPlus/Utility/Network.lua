@@ -11,11 +11,19 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 ---- Imports ----
 
-local Enums = require(script.Parent.Parent.Enums)
+local Package = script.Parent.Parent
+local UtilityModules = Package.Utility
+
+local Enums = require(Package.Enums)
+local CompressionUtility = require(UtilityModules.Compression)
 
 ---- Settings ----
 
 local FOLDER_NAME = "_CONNECTIONS"
+
+--! FIXME(Axen): Remove this once the BaseRemoteEvent type is LIVE
+type BaseRemoteEvent = RemoteEvent
+type UnreliableRemoteEvent = RemoteEvent
 
 ---- Constants ----
 
@@ -46,7 +54,8 @@ local function InitializeServerConnections()
     ReliableConnection.Name = "Reliable"
     ReliableConnection.Parent = Events
 
-    UnreliableConnection = Instance.new("UnreliableRemoteEvent")
+    --! FIXME: Remove this type casting once UnreliableRemoteEvent is LIVE
+    UnreliableConnection = Instance.new("UnreliableRemoteEvent") :: any
     UnreliableConnection.Name = "Unreliable"
     UnreliableConnection.Parent = Events
 
@@ -86,6 +95,7 @@ end
 
 ---- Initialization ----
 
+--> Initialize context connections
 if RunService:IsServer() then
     InitializeServerConnections()
 else

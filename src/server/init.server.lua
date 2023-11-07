@@ -4,7 +4,7 @@ local NetworkOwnershipPlus = require(ReplicatedStorage.NetworkOwnershipPlus)
 local Enums = NetworkOwnershipPlus.Enums
 local BenchmarkUtility = require(ReplicatedStorage.NetworkOwnershipPlus.Utility.Benchmark)
 local CompressionUtility = NetworkOwnershipPlus.Compression
-local CompressionTypes = CompressionUtility.CompressionTypes
+local Types = CompressionUtility.Types
 
 do
     type Structure = {
@@ -16,11 +16,11 @@ do
     }
 
     local CompressionTable = CompressionUtility.CreateCompressionTable({
-        CompressionTypes.UnsignedByte,
-        CompressionTypes.String,
-        CompressionTypes.UnsignedShort,
-        CompressionTypes.Boolean,
-        CompressionTypes.Vector
+        Types.UnsignedByte,
+        Types.String,
+        Types.UnsignedShort,
+        Types.Boolean,
+        Types.Vector
     }, {
         "Identifier",
         "Name",

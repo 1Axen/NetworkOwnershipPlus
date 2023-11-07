@@ -17,8 +17,9 @@ local Utility = Package.Utility
 
 local Types = require(Package.Types)
 local Enums = require(Package.Enums)
-local NetworkUtility = require(Utility.Network)
-local CompressionUtility = require(Utility.Compression)
+local Buffer = require(Utility.Buffer)
+local Network = require(Utility.Network)
+local Compression = require(Utility.Compression)
 
 ---- Settings ----
 
@@ -48,22 +49,10 @@ local EntitySlots: {Types.Entity} = table.create(MAXIMUM_ENTITIES)
 local PlayerRecords: {[number]: Types.PlayerRecord} = {}
 local EntityDefinitions: {[string]: Types.EntityDefinition} = {}
 
-local SnapshotCompressedTable = CompressionUtility.CreateCompressionTable({
-    CompressionUtility.CompressionTypes.Byte,
-    CompressionUtility.CompressionTypes.UnsignedInteger,
-    CompressionUtility.CompressionTypes.Double,
-    CompressionUtility.CompressionTypes.String
-}, {
-    "Event",
-    "Frame",
-    "Timestamp",
-    "Stream"
-})
-
 ---- Private Functions ----
 
-local function BuildSnapshot(PlayerRecord: Types.PlayerRecord): string
-    local Snapshot = ""
+local function BuildSnapshot(PlayerRecord: Types.PlayerRecord): ({string})
+    local Streams: {string} = {}
 
     for _, Entity in EntitySlots do
         if Entity.ReplicationState == Enums.ReplicationState.DontSend then
@@ -86,7 +75,7 @@ local function BuildSnapshot(PlayerRecord: Types.PlayerRecord): string
         end
 
         local Identifier = Entity.Identifier
-        local EntitySerialized: CompressionUtility.SupportedValuesLayout = Entity:Serialize()
+        local EntitySerialized: Compression.SupportedValuesLayout = Entity:Serialize()
         local ReplicationRecord = PlayerRecord.Replication[Identifier]
 
         PlayerRecord.Replication[Identifier] = {
@@ -102,16 +91,11 @@ local function BuildSnapshot(PlayerRecord: Types.PlayerRecord): string
             Stream = Entity.CompressionTable.Compress(EntitySerialized, ReplicationRecord.Layout)
         end
 
-        --> Add stream & entity terminator
-        Snapshot ..= Stream .. "\0"
+        --> Add stream entry
+        table.insert(Streams, Stream)
     end
 
-    return SnapshotCompressedTable.Compress({
-        Event = Enums.SystemEvent.WorldSnapshot,
-        Frame = ServerFrame,
-        Timestamp = ServerTimer,
-        Snapshot = Snapshot
-    })
+    return Streams
 end
 
 local function OnPlayerAdded(Player: Player)
@@ -119,7 +103,9 @@ local function OnPlayerAdded(Player: Player)
         Slot = 0,
         Player = Player,
         UserId = Player.UserId,
+
         Entities = {},
+        Replication = {},
 
         SendFullWorldSnapshot = true,
     }
@@ -142,7 +128,7 @@ local function OnPlayerAdded(Player: Player)
     PlayerRecords[Player.UserId] = PlayerRecord
 
     --> Replicate initial state
-    NetworkUtility.SendReliableEvent(
+    Network.SendReliableEvent(
         Enums.NetworkRecipient.Player, 
         Player, 
         string.pack("B", Enums.SystemEvent.Initialize),
@@ -182,24 +168,14 @@ local function OnReliableEvent(Player: Player, Stream: string, Packet: any)
         return
     end
 
-    local Success, Event: number = pcall(function()
-        return string.unpack("B", Stream)
-    end)
-
-    if not Success then
-        return
-    end
+    local StreamBuffer = Buffer.new(Stream)
+    local Event = StreamBuffer.ReadUnsignedByte()
 
     if Event == Enums.SystemEvent.RequestFullSnapshot then
         PlayerRecord.SendFullWorldSnapshot = true
     elseif Event == Enums.SystemEvent.ProcessEntityEvent then
-        local Success, Identifier, Frame = pcall(function()
-            return string.unpack("HJ", Stream, 2)
-        end)
-
-        if not Success then
-            return
-        end
+        local Frame = StreamBuffer.ReadUnsignedInteger()
+        local Identifier = StreamBuffer.ReadUnsignedShort()
 
         local Entity = PlayerRecord.Entities[Identifier]
         if not Entity then
@@ -226,22 +202,13 @@ local function OnUnreliableEvent(Player: Player, Stream: string, Packet: any)
         return
     end
 
-    local Success, Event: number = pcall(function()
-        return string.unpack("B", Stream)
-    end)
-
-    if not Success then
-        return
-    end
+    local StreamBuffer = Buffer.new(Stream)
+    local Event = StreamBuffer.ReadByte()
 
     if Event == Enums.SystemEvent.ProcessEntityEvent then
-        local Success, Identifier, Frame, EventType = pcall(function()
-            return string.unpack("HJB", Stream, 2)
-        end)
-
-        if not Success then
-            return
-        end
+        local Frame = StreamBuffer.ReadUnsignedInteger()
+        local EventType = StreamBuffer.ReadUnsignedByte()
+        local Identifier = StreamBuffer.ReadUnsignedShort()
 
         local Entity = PlayerRecord.Entities[Identifier]
         if not Entity then
@@ -255,13 +222,8 @@ local function OnUnreliableEvent(Player: Player, Stream: string, Packet: any)
                 Packet = Packet
             })
         elseif EventType == Enums.EntityEvent.Command then
-            local Success, Movement, DeltaTime = pcall(function()
-                return string.unpack("Bd", Stream)
-            end)
-
-            if not Success then
-                return
-            end
+            local Movement = StreamBuffer.ReadUnsignedByte()
+            local DeltaTime = StreamBuffer.ReadDouble()
 
             Entity:ProcessEvent({
                 Type = Enums.EntityEvent.Custom,
@@ -298,12 +260,23 @@ local function OnPostSimulation(DeltaTime: number)
         --> We account for this by only subtracting the time needed to send one snapshot instead of resetting the timer
         ServerUpdateTimer -= SERVER_UPDATE_RATE
 
+        local EventBuffer = Buffer.new("")
+        EventBuffer.WriteUnsignedByte(Enums.SystemEvent.WorldSnapshot)
+        EventBuffer.WriteUnsignedInteger(ServerFrame)
+        EventBuffer.WriteDouble(ServerTimer)
+
+        print(`Frame: {ServerFrame}, Timestamp: {ServerTimer}`)
+
         for _, PlayerRecord in PlayerRecords do
-            NetworkUtility.SendUnreliableEvent(
+            --! FIXME(Axen): Convert to unreliable event once they are released
+            local Streams = BuildSnapshot(PlayerRecord)
+            Network.SendReliableEvent(
                 Enums.NetworkRecipient.Player, 
-                PlayerRecord.Player, 
-                BuildSnapshot(PlayerRecord)
+                PlayerRecord.Player,
+                EventBuffer,
+                Streams
             )
+            print(`{PlayerRecord.Player.Name} ({PlayerRecord.UserId}):`, Streams)
         end
     end
 end
@@ -331,7 +304,7 @@ function Server.CreateEntity(Name: string, Angle: Vector3, Position: Vector3, Ow
     EntitySlots[Identifier] = Entity
 
     --> Replicate entity creation
-    NetworkUtility.SendReliableEvent(
+    Network.SendReliableEvent(
         Enums.NetworkRecipient.AllPlayers, 
         string.pack(
             "BH", 
@@ -360,7 +333,7 @@ function Server.DestroyEntity(Entity: Types.Entity)
     end
 
     --> Replicate destruction
-    NetworkUtility.SendReliableEvent(
+    Network.SendReliableEvent(
             Enums.NetworkRecipient.AllPlayers, 
             string.pack(
                 "BH", 
@@ -381,7 +354,7 @@ function Server.SetEntityNetworkOwner(Entity: Types.Entity, Owner: Player?)
     local PreviousOwner = Entity.Owner
     if PreviousOwner then
         PreviousOwner.Entities[Entity.Identifier] = nil
-        NetworkUtility.SendReliableEvent(
+        Network.SendReliableEvent(
             Enums.NetworkRecipient.Player, 
             PreviousOwner.Player,
             string.pack(
@@ -399,7 +372,7 @@ function Server.SetEntityNetworkOwner(Entity: Types.Entity, Owner: Player?)
     end
 
     PlayerRecord.Entities[Entity.Identifier] = Entity
-    NetworkUtility.SendReliableEvent(
+    Network.SendReliableEvent(
         Enums.NetworkRecipient.Player, 
         Owner,
         string.pack(
@@ -425,8 +398,8 @@ function Server.Initialize()
     RunService.PreSimulation:Connect(OnPreSimulation)
     RunService.PostSimulation:Connect(OnPostSimulation)
 
-    NetworkUtility.SetupConnection(Enums.ConnectionType.Reliable, OnReliableEvent)
-    NetworkUtility.SetupConnection(Enums.ConnectionType.Unreliable, OnUnreliableEvent)    
+    Network.SetupConnection(Enums.ConnectionType.Reliable, OnReliableEvent)
+    Network.SetupConnection(Enums.ConnectionType.Unreliable, OnUnreliableEvent)    
 end
 
 return Server
