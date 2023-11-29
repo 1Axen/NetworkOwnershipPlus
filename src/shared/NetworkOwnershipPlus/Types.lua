@@ -20,21 +20,40 @@
 local Package = script.Parent
 local Utility = Package.Utility
 
-local CompressionUtility = require(Utility.Compression)
+local Compression = require(Utility.Compression)
 
 ---- Types ----
 
 --> SUPER & PARTIAL TYPES
 
+export type UserEntityDefinition = {
+    --> Members
+    Name: string,
+    Serialized: {[string]: string},
+
+    --> Methods
+    CreateEntity: (Angle: Vector3, Position: Vector3) -> Entity,
+}
+
 --> PUBLIC TYPES
+
+export type Settings = {
+    UpdateRate: number,
+    Interpolation: number,
+    CommandBufferTime: number,
+    CommandProcessingTime: number
+}
 
 export type Event = {
     Type: number,
+    Time: number,
     Frame: number,
     Player: PlayerRecord?,
 }
 
 export type Command = Event & {
+    Entity: number,
+
     --> Input
     X: number,
     Y: number,
@@ -56,6 +75,8 @@ export type PlayerRecord = {
 
     Entities: {Entity},
     Replication: {[number]: ReplicationRecord},
+
+    Commands: {Command},
 
     --> Replication State
     SendFullWorldSnapshot: boolean,
@@ -80,8 +101,8 @@ export type Component = {
 
 export type Entity = {
     Identifier: number,
+    Definition: EntityDefinition,
     ReplicationState: number,
-    CompressionTable: CompressionUtility.CompressionTable,
 
     --> Ownership
     Owner: PlayerRecord?,
@@ -105,7 +126,7 @@ export type Entity = {
     ServerDestroy: (Entity) -> (),
 
     --> Server network methods
-    Serialize: (Entity) -> CompressionUtility.SupportedValuesLayout,
+    Serialize: (Entity) -> {[string]: Compression.SupportedValues},
     SetNetworkOwner: (Entity, Owner: Player?) -> (),
     ShouldReplicate: (Entity, Player: PlayerRecord) -> boolean,
 }
@@ -137,9 +158,9 @@ export type RenderedEntity = {
 }
 
 --> This is what you should pass into RegisterEntity
-export type EntityDefinition = {
-    Name: string,
-    CreateEntity: (Angle: Vector3, Position: Vector3) -> Entity,
+export type EntityDefinition = UserEntityDefinition & {
+    Identifier: number,
+    CompressionTable: Compression.CompressionTable,
 }
 
 return {}

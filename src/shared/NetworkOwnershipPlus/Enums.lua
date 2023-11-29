@@ -3,6 +3,7 @@ return {
         Server = 1,
         Player = 2,
         AllPlayers = 3,
+        AllPlayersExcept = 4,
     },
 
     ReplicationState = {
@@ -14,7 +15,7 @@ return {
 
     SystemEvent = {
         Initialize = 0,
-        --CreateEntity = 1,
+        AssignSlot = 1,
         DestroyEntity = 2,
         WorldSnapshot = 3,
         AssignOwnership = 4,

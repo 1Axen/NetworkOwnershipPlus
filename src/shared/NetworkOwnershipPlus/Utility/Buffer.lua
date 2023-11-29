@@ -26,9 +26,13 @@ local Types = CompressionUtility.Types
 
 ---- Public Functions ----
 
-function Buffer.new(Stream: string)
+function Buffer.new(Stream: string?)
     local Cursor = 0
+    local Stream = Stream or ""
     local BufferInstance = {}
+
+    local Format = ""
+    local Values: {number | string} = {}
 
     --> Read functions
     function BufferInstance.ReadByte(): number
@@ -95,36 +99,41 @@ function Buffer.new(Stream: string)
     end
 
     --> Write functions
+    local function WriteToFormat(Type: string, Value)
+        Format ..= Type
+        table.insert(Values, Value)
+    end
+
     function BufferInstance.WriteByte(Value: number)
-    
+        WriteToFormat("b", Value)
     end
 
     function BufferInstance.WriteUnsignedByte(Value: number)
-         
+         WriteToFormat("B", Value)
     end
 
     function BufferInstance.WriteShort(Value: number)
-        
+        WriteToFormat("h", Value)
     end
 
     function BufferInstance.WriteUnsignedShort(Value: number)
-        
+        WriteToFormat("H", Value)
     end
 
     function BufferInstance.WriteInteger(Value: number)
-        
+        WriteToFormat("j", Value)
     end
 
     function BufferInstance.WriteUnsignedInteger(Value: number)
-        
+        WriteToFormat("J", Value)
     end
 
     function BufferInstance.WriteFloat(Value: number)
-        
+        WriteToFormat("f", Value)
     end
 
     function BufferInstance.WriteDouble(Value: number)
-        
+        WriteToFormat("d", Value)
     end
 
     function BufferInstance.WriteBytes(Value: number, Bytes: number)
@@ -142,8 +151,13 @@ function Buffer.new(Stream: string)
 
     -- selene: allow(shadowing)
     function BufferInstance.WriteString(String: string, Length: number?)
-        local Length = Length or string.len(String)
-        
+        local Size = Length or string.len(String)
+        WriteToFormat(`c{Size}`, String)
+    end
+
+    --> Export methods
+    function BufferInstance.ToString(): string
+        return string.pack(Format, table.unpack(Values))
     end
 
     return BufferInstance

@@ -23,31 +23,37 @@ local Compression = require(Utility.Compression)
 
 ---- Settings ----
 
+local SERVER_RATE = (1 / 60) -- Assume stable 60 FPS
+
 local MAXIMUM_PLAYERS = 2^8
 local MAXIMUM_ENTITIES = 2^16
 
 local MAXIMUM_FIELD_OF_VIEW = math.rad(120)
 local MAXIMUM_VISIBILITY_DISTANCE = 2000
 
-local SERVER_UPDATE_RATE = (1 / 20) --> 20 FPS
-
 ---- Constants ----
 
-local Server = {}
+local Server = {
+    Frame = 0,
+    Timer = 0,
+
+    SnapshotTimer = 0,
+}
+
+local Settings: Types.Settings;
 
 ---- Variables ----
 
 local ServerStart = 0
 
-local ServerFrame = 0
-local ServerTimer = 0
-local ServerUpdateTimer = 0
-
 local Slots: {Types.PlayerRecord} = table.create(MAXIMUM_PLAYERS)
+local UserIdSlots: {[number]: number} = {}
 local EntitySlots: {Types.Entity} = table.create(MAXIMUM_ENTITIES)
 
 local PlayerRecords: {[number]: Types.PlayerRecord} = {}
-local EntityDefinitions: {[string]: Types.EntityDefinition} = {}
+
+local EntityMappings: {string} = {}
+local EntityDefinitions: {[string]: Types.EntityDefinition};
 
 ---- Private Functions ----
 
@@ -79,16 +85,16 @@ local function BuildSnapshot(PlayerRecord: Types.PlayerRecord): ({string})
         local ReplicationRecord = PlayerRecord.Replication[Identifier]
 
         PlayerRecord.Replication[Identifier] = {
-            Frame = ServerFrame,
+            Frame = Server.Frame,
             Layout = EntitySerialized
         }
 
         --> Should we send a full snapshot or a delta one?
         local Stream: string;
-        if not ReplicationRecord or (ServerFrame - ReplicationRecord.Frame) > 1 or PlayerRecord.SendFullWorldSnapshot then
-            Stream = Entity.CompressionTable.Compress(EntitySerialized)
+        if not ReplicationRecord or (Server.Frame - ReplicationRecord.Frame) > 1 or PlayerRecord.SendFullWorldSnapshot then
+            Stream = Entity.Definition.CompressionTable.Compress(EntitySerialized)
         else
-            Stream = Entity.CompressionTable.Compress(EntitySerialized, ReplicationRecord.Layout)
+            Stream = Entity.Definition.CompressionTable.Compress(EntitySerialized, ReplicationRecord.Layout)
         end
 
         --> Add stream entry
@@ -106,6 +112,8 @@ local function OnPlayerAdded(Player: Player)
 
         Entities = {},
         Replication = {},
+
+        Commands = {},
 
         SendFullWorldSnapshot = true,
     }
@@ -125,26 +133,57 @@ local function OnPlayerAdded(Player: Player)
     end
 
     --> Add to records
+    UserIdSlots[Player.UserId] = PlayerRecord.Slot
     PlayerRecords[Player.UserId] = PlayerRecord
 
     --> Replicate initial state
-    local EventBuffer = Buffer.new("")
-    EventBuffer.WriteByte(Enums.SystemEvent.Initialize)
-    EventBuffer.WriteDouble(SERVER_UPDATE_RATE)
-    EventBuffer.WriteDouble(ServerTimer)
+    do
+        local EventBuffer = Buffer.new()
+        EventBuffer.WriteByte(Enums.SystemEvent.Initialize)
+        EventBuffer.WriteDouble(ServerStart)
 
-    Network.SendReliableEvent(
-        Enums.NetworkRecipient.Player, 
-        Player, 
-        EventBuffer,
-        Slots
-    )
+        Network.SendReliableEvent(
+            Enums.NetworkRecipient.Player, 
+            Player, 
+            EventBuffer.ToString(),
+            UserIdSlots,
+            EntityMappings
+        )
+    end
+
+    --> Replicate slot assignment
+    do
+        local EventBuffer = Buffer.new()
+        EventBuffer.WriteUnsignedByte(Enums.SystemEvent.AssignSlot)
+        EventBuffer.WriteUnsignedByte(PlayerRecord.Slot)
+        EventBuffer.WriteUnsignedInteger(Player.UserId)
+
+        Network.SendReliableEvent(
+            Enums.NetworkRecipient.AllPlayersExcept,
+            Player,
+            EventBuffer
+        )
+    end
 end
 
 local function OnPlayerRemoving(Player: Player)
     local PlayerRecord = PlayerRecords[Player.UserId]
     if not PlayerRecord then
         return
+    end
+
+    --> Replicate slot assignment
+    do
+        local EventBuffer = Buffer.new()
+        EventBuffer.WriteUnsignedByte(Enums.SystemEvent.AssignSlot)
+        EventBuffer.WriteUnsignedByte(PlayerRecord.Slot)
+        EventBuffer.WriteUnsignedInteger(0)
+
+        Network.SendReliableEvent(
+            Enums.NetworkRecipient.AllPlayersExcept,
+            Player,
+            EventBuffer
+        )
     end
 
     --> Remove entity ownership
@@ -155,6 +194,7 @@ local function OnPlayerRemoving(Player: Player)
 
     --> Remove from records
     Slots[PlayerRecord.Slot] = nil
+    UserIdSlots[Player.UserId] = nil
     PlayerRecords[PlayerRecord.UserId] = nil
 
     --> Clear
@@ -162,9 +202,9 @@ local function OnPlayerRemoving(Player: Player)
 end
 
 -- selene: allow(shadowing)
-local function OnReliableEvent(Player: Player, Stream: string, Packet: any)
+local function OnNetworkEvent(Player: Player, Stream: string, Packet: any)
     --> Type validation
-    if typeof(Stream) ~= "string" then
+    if type(Stream) ~= "string" then
         return
     end
 
@@ -179,41 +219,15 @@ local function OnReliableEvent(Player: Player, Stream: string, Packet: any)
     if Event == Enums.SystemEvent.RequestFullSnapshot then
         PlayerRecord.SendFullWorldSnapshot = true
     elseif Event == Enums.SystemEvent.ProcessEntityEvent then
-        local Frame = StreamBuffer.ReadUnsignedInteger()
-        local Identifier = StreamBuffer.ReadUnsignedShort()
-
-        local Entity = PlayerRecord.Entities[Identifier]
-        if not Entity then
-            return
-        end
-
-        Entity:ServerProcessEvent({
-            Type = Enums.EntityEvent.Custom,
-            Frame = Frame,
-            Packet = Packet
-        })
-    end
-end
-
--- selene: allow(shadowing)
-local function OnUnreliableEvent(Player: Player, Stream: string, Packet: any)
-    --> Type validation
-    if typeof(Stream) ~= "string" then
-        return
-    end
-
-    local PlayerRecord = PlayerRecords[Player.UserId]
-    if not PlayerRecord then
-        return
-    end
-
-    local StreamBuffer = Buffer.new(Stream)
-    local Event = StreamBuffer.ReadByte()
-
-    if Event == Enums.SystemEvent.ProcessEntityEvent then
+        local Time = StreamBuffer.ReadDouble()
         local Frame = StreamBuffer.ReadUnsignedInteger()
         local EventType = StreamBuffer.ReadUnsignedByte()
         local Identifier = StreamBuffer.ReadUnsignedShort()
+
+        --> Prevent invalid command times
+        if Time > Server.Timer then
+            return
+        end
 
         local Entity = PlayerRecord.Entities[Identifier]
         if not Entity then
@@ -223,6 +237,7 @@ local function OnUnreliableEvent(Player: Player, Stream: string, Packet: any)
         if EventType == Enums.EntityEvent.Custom then
             Entity:ServerProcessEvent({
                 Type = Enums.EntityEvent.Custom,
+                Time = Time,
                 Frame = Frame,
                 Packet = Packet
             })
@@ -230,9 +245,16 @@ local function OnUnreliableEvent(Player: Player, Stream: string, Packet: any)
             local Movement = StreamBuffer.ReadUnsignedByte()
             local DeltaTime = StreamBuffer.ReadDouble()
 
-            Entity:ServerProcessEvent({
+            --> Prevent commands with large delta times (speed hack)
+            if DeltaTime > Settings.CommandProcessingTime then
+                return
+            end
+
+            table.insert(PlayerRecord.Commands, {
                 Type = Enums.EntityEvent.Movement,
+                Time = Time,
                 Frame = Frame,
+                Entity = Entity.Identifier,
                 Packet = Packet,
                 DeltaTime = DeltaTime,
 
@@ -250,9 +272,56 @@ end
 
 local function OnPostSimulation(DeltaTime: number)
     --> Advance timers
-    ServerFrame += 1
-    ServerTimer = os.clock() - ServerStart
-    ServerUpdateTimer += DeltaTime
+    Server.Frame += 1
+    Server.Timer = workspace:GetServerTimeNow() - ServerStart
+    Server.SnapshotTimer += DeltaTime
+
+    --> Process commands
+    for _, PlayerRecord in PlayerRecords do
+        local Commands = PlayerRecord.Commands
+        local TimeSimulated = 0
+
+        --> Sort commands (fixes out of order commands)
+        --> Process oldest commands first
+        table.sort(Commands, function(A, B)
+            return A.Frame < B.Frame
+        end)
+
+        for Index = #Commands, 1, -1 do
+            --> Do not simulate more than the maximum allowed time (Speed hack)
+            if TimeSimulated > Settings.CommandProcessingTime then
+                break
+            end
+
+            local Command = Commands[Index]
+            if not Command then
+                continue
+            end
+
+            --> Is command being buffered?
+            if (Server.Timer - Command.Time) < Settings.CommandBufferTime then
+                continue
+            end
+
+            --> Remove command from queue
+            table.remove(Commands, Index)
+
+            local Entity = EntitySlots[Command.Entity]
+            
+            --> Entity was deleted
+            if not Entity then
+                continue
+            end
+
+            --> Player lost ownership
+            if Entity.Owner ~= PlayerRecord then
+                continue
+            end
+
+            TimeSimulated += Command.DeltaTime
+            Entity:ServerProcessEvent(Command)
+        end
+    end
 
     --> Step entities & components
     for _, Entity in EntitySlots do
@@ -264,17 +333,17 @@ local function OnPostSimulation(DeltaTime: number)
     end
 
     --> Replicate world to players
-    if ServerUpdateTimer >= SERVER_UPDATE_RATE then
+    if Server.SnapshotTimer >= Settings.UpdateRate then
         --> The server might have lagged, and taken extra time to process the last frame
         --> We account for this by only subtracting the time needed to send one snapshot instead of resetting the timer
-        ServerUpdateTimer -= SERVER_UPDATE_RATE
+        Server.SnapshotTimer -= Settings.UpdateRate
 
-        local EventBuffer = Buffer.new("")
+        local EventBuffer = Buffer.new()
         EventBuffer.WriteUnsignedByte(Enums.SystemEvent.WorldSnapshot)
-        EventBuffer.WriteUnsignedInteger(ServerFrame)
-        EventBuffer.WriteDouble(ServerTimer)
+        EventBuffer.WriteUnsignedInteger(Server.Frame)
+        EventBuffer.WriteDouble(Server.Timer)
 
-        print(`Frame: {ServerFrame}, Timestamp: {ServerTimer}`)
+        print(`Frame: {Server.Frame}, Timestamp: {Server.Timer}`)
 
         for _, PlayerRecord in PlayerRecords do
             --! FIXME(Axen): Convert to unreliable event once they are released
@@ -282,7 +351,7 @@ local function OnPostSimulation(DeltaTime: number)
             Network.SendReliableEvent(
                 Enums.NetworkRecipient.Player, 
                 PlayerRecord.Player,
-                EventBuffer,
+                EventBuffer.ToString(),
                 Streams
             )
             print(`{PlayerRecord.Player.Name} ({PlayerRecord.UserId}):`, Streams)
@@ -330,35 +399,30 @@ function Server.DestroyEntity(Entity: Types.Entity)
     end
 
     --> Replicate destruction
+    local EventBuffer = Buffer.new()
+    EventBuffer.WriteUnsignedByte(Enums.SystemEvent.DestroyEntity)
+    EventBuffer.WriteUnsignedShort(Entity.Identifier)
     Network.SendReliableEvent(
-            Enums.NetworkRecipient.AllPlayers, 
-            string.pack(
-                "BH", 
-                Enums.SystemEvent.DestroyEntity, 
-                Entity.Identifier
-            )
-        )
+        Enums.NetworkRecipient.AllPlayers, 
+        EventBuffer.ToString()
+    )
     
     --> Call entity destroy
     Entity:ServerDestroy()
 end
 
-function Server.RegisterEntity(Definition: Types.EntityDefinition)
-    EntityDefinitions[Definition.Name] = Definition
-end
-
 function Server.SetEntityNetworkOwner(Entity: Types.Entity, Owner: Player?)
     local PreviousOwner = Entity.Owner
     if PreviousOwner then
+        local EventBuffer = Buffer.new()
+        EventBuffer.WriteUnsignedByte(Enums.SystemEvent.RemoveOwnership)
+        EventBuffer.WriteUnsignedShort(Entity.Identifier)
+
         PreviousOwner.Entities[Entity.Identifier] = nil
         Network.SendReliableEvent(
             Enums.NetworkRecipient.Player, 
             PreviousOwner.Player,
-            string.pack(
-                "BH", 
-                Enums.SystemEvent.RemoveOwnership, 
-                Entity.Identifier
-            )
+            EventBuffer.ToString()
         )
     end
 
@@ -368,26 +432,36 @@ function Server.SetEntityNetworkOwner(Entity: Types.Entity, Owner: Player?)
         return
     end
 
+    local EventBuffer = Buffer.new()
+    EventBuffer.WriteUnsignedByte(Enums.SystemEvent.AssignOwnership)
+    EventBuffer.WriteUnsignedByte(PlayerRecord.Slot)
+    EventBuffer.WriteUnsignedShort(Entity.Identifier)
+
     PlayerRecord.Entities[Entity.Identifier] = Entity
     Network.SendReliableEvent(
-        Enums.NetworkRecipient.Player, 
-        Owner,
-        string.pack(
-            "BH", 
-            Enums.SystemEvent.AssignOwnership, 
-            Entity.Identifier
-        )
+        Enums.NetworkRecipient.AllPlayers,
+        EventBuffer.ToString()
     )
 end
 
 ---- Initialization ----
 
-function Server.Initialize()
+function Server.Initialize(UserSettings: Types.Settings, UserEntities: {[string]: Types.EntityDefinition})
     if Players.MaxPlayers > MAXIMUM_PLAYERS then
         warn(`[WARNING] NetworkOwnershipPlus only supports 256 maximum players, but the server size is {Players.MaxPlayers}. Any excess players will be kicked upon connecting to the server!`)
     end
 
-    ServerStart = os.clock()
+    --> Create entity mappings
+    local Index = 0
+    for _, Entity in UserEntities do
+        Entity.Identifier = Index
+        EntityMappings[Index] = Entity.Name
+        Index += 1
+    end
+
+    Settings = UserSettings
+    EntityDefinitions = UserEntities
+    ServerStart = workspace:GetServerTimeNow()
 
     Players.PlayerAdded:Connect(OnPlayerAdded)
     Players.PlayerRemoving:Connect(OnPlayerRemoving)
@@ -395,8 +469,8 @@ function Server.Initialize()
     RunService.PreSimulation:Connect(OnPreSimulation)
     RunService.PostSimulation:Connect(OnPostSimulation)
 
-    Network.SetupConnection(Enums.ConnectionType.Reliable, OnReliableEvent)
-    Network.SetupConnection(Enums.ConnectionType.Unreliable, OnUnreliableEvent)    
+    Network.SetupConnection(Enums.ConnectionType.Reliable, OnNetworkEvent)
+    Network.SetupConnection(Enums.ConnectionType.Unreliable, OnNetworkEvent)    
 end
 
 return Server

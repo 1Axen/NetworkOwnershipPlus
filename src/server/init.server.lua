@@ -2,9 +2,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local NetworkOwnershipPlus = require(ReplicatedStorage.NetworkOwnershipPlus)
 
 local Enums = NetworkOwnershipPlus.Enums
-local BenchmarkUtility = require(ReplicatedStorage.NetworkOwnershipPlus.Utility.Benchmark)
-local CompressionUtility = NetworkOwnershipPlus.Compression
-local Types = CompressionUtility.Types
+local Benchmark = require(ReplicatedStorage.NetworkOwnershipPlus.Utility.Benchmark)
+local Compression = NetworkOwnershipPlus.Compression
+local Types = Compression.Types
 
 do
     type Structure = {
@@ -15,33 +15,35 @@ do
         Position: Vector3,
     }
 
-    local CompressionTable = CompressionUtility.CreateCompressionTable({
-        Types.UnsignedByte,
-        Types.String,
-        Types.UnsignedShort,
-        Types.Boolean,
-        Types.Vector
-    }, {
-        "Identifier",
-        "Name",
-        "Health",
-        "Jumping",
-        "Position",
+    local CompressionTable = Compression.CreateCompressionTable({
+        Identifier = Types.UnsignedByte,
+        Name = Types.String,
+        Health = Types.UnsignedShort,
+        Jumping = Types.Boolean,
+        Position = Types.Vector
     })  
     
     local Input = {
-        CompressionUtility.Always(0),
-        "Hello, World!",
-        65535,
-        true,
-        Vector3.new(0, 0, 0),
+        Identifier = Compression.Always(0),
+        Name = "Hello, World!",
+        Health = 65535,
+        Jumping = false,
+        Position = Vector3.new(0, 0, 0),
     }
 
-    local Stream = CompressionTable.Compress(Input)
-    local Result: Structure = CompressionTable.Decompress(Stream)
+    local LastInput = table.clone(Input)
 
-    print(Result)
-    print(`Identifier: {Result.Identifier}\nName: {Result.Name}\nHealth: {Result.Health}\nJumping: {Result.Jumping}\nPosition: {Result.Position}`)
+    local Stream = CompressionTable.Compress(Input)
+    print(CompressionTable.Decompress(Stream))
+
+    Input.Health = 0
+    Input.Jumping = true
+    Input.Position = Vector3.yAxis
+
+    Stream = CompressionTable.Compress(Input, LastInput)
+    local Decompress = CompressionTable.Decompress(Stream)
+    Compression.ReconcileWithDeltaTable(Decompress, LastInput)
+    print(LastInput)
     
     --[[BenchmarkUtility.Benchmark("Compression", 10_000, function()
         CharacterCompressionTable.Compress(Input)
