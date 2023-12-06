@@ -6,11 +6,13 @@
 
 ---- Services ----
 
+local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
 ---- Imports ----
 
 local Protocol = require(script.Parent.Protocol)
+local Identifier = require(script.Parent.Identifier)
 
 ---- Settings ----
 
@@ -20,8 +22,8 @@ type Event<T...> = {
 
     Validate: (...unknown) -> (T...),
 
-    Listener: boolean?,
-    Listen: (self: Event<T...>, T...) -> (),
+    Listener: ((T...) -> ())?,
+    Listen: (self: Event<T...>, Listener: (T...) -> ()) -> (),
 
     FireClient: (self: Event<T...>, Player: Player, T...) -> (),
     FireClients: (self: Event<T...>, Players: {Player}, T...) -> (),
@@ -37,49 +39,61 @@ type EventConstructorOptions<T...> = {
     Validate: (...unknown) -> (T...)
 }
 
+---- Constants ----
+
+local IsServer = RunService:IsServer()
+
 ---- Functions ----
 
 local function FireClient<T...>(self: Event<T...>, Player: Player, ...: T...)
-    assert(RunService:IsServer(), "FireClient can only be called from the server.")
+    assert(IsServer, "FireClient can only be called from the server.")
+    Protocol.Server.SendEvent(self.Identifier, self.Reliable, Player, ...)
 end
 
-local function FireClients<T...>(self: Event<T...>, Players: {Player}, ...: T...)
-    assert(RunService:IsServer(), "FireClients can only be called from the server.")
+local function FireClients<T...>(self: Event<T...>, Clients: {Player}, ...: T...)
+    assert(IsServer, "FireClients can only be called from the server.")
+    for _, Player in Clients do
+        Protocol.Server.SendEvent(self.Identifier, self.Reliable, Player, ...)
+    end
 end
 
 local function FireAllClients<T...>(self: Event<T...>, ...: T...)
-    assert(RunService:IsServer(), "FireAllClients can only be called from the server.")
+    assert(IsServer, "FireAllClients can only be called from the server.")
+    for _, Player in Players:GetPlayers() do
+        Protocol.Server.SendEvent(self.Identifier, self.Reliable, Player, ...)
+    end
 end
 
-local function FireAllClientsExcept<T...>(self: Event<T...>, Player: Player, ...: T...)
-    assert(RunService:IsServer(), "FireAllClientsExcept can only be called from the server.")
+local function FireAllClientsExcept<T...>(self: Event<T...>, Except: Player, ...: T...)
+    assert(IsServer, "FireAllClientsExcept can only be called from the server.")
+    for _, Player in Players:GetPlayers() do
+        if Player == Except then
+            continue
+        end
+
+        Protocol.Server.SendEvent(self.Identifier, self.Reliable, Player, ...)
+    end
 end
 
 local function FireServer<T...>(self: Event<T...>, ...: T...)
-    assert(RunService:IsClient(), "FireServer can only be called from the client.")
+    assert(not IsServer, "FireServer can only be called from the client.")
+    Protocol.Client.SendEvent(self.Identifier, self.Reliable, ...)
 end
 
 local function Listen<T...>(self: Event<T...>, Listener: (T...) -> ())
     assert(self.Listener == nil, "Listener can only bet set once!")
-    self.Listener = true
-    Protocol.SetListener(self.Identifier, function(...)
-        if pcall(self.Validate, ...) then
-            Listener(...)
-        end
-    end)
+    self.Listener = Listener
 end
 
 ---- Constructor ----
 
 return function<T...>(Options: EventConstructorOptions<T...>): Event<T...>
-    return {
-        Identifier = Protocol.GetIdentifier(Options.Name),
+    local self: Event<T...> = {
+        Identifier = Identifier.GetShared(Options.Name),
         Reliable = not Options.Unreliable,
-        Listener = false,
-
-        Validate = Options.Validate,
-
+        
         Listen = Listen,
+        Validate = Options.Validate,
 
         FireClient = FireClient,
         FireClients = FireClients,
@@ -88,4 +102,20 @@ return function<T...>(Options: EventConstructorOptions<T...>): Event<T...>
 
         FireServer = FireServer
     } :: any
+
+    if IsServer then
+        Protocol.Server.SetListener(self.Identifier, function(...)
+            if self.Listener and pcall(self.Validate, ...) then
+                self.Listener(...)
+            end
+        end)
+    else
+        Protocol.Client.SetListener(self.Identifier, function(...)
+            if self.Listener and pcall(self.Validate, ...) then
+                self.Listener(...)
+            end
+        end)
+    end
+
+    return self
 end
