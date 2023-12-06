@@ -10,13 +10,17 @@ local RunService = game:GetService("RunService")
 
 ---- Imports ----
 
+local Protocol = require(script.Parent.Protocol)
+
 ---- Settings ----
 
 type Event<T...> = {
-    Identifier: number,
+    Identifier: string,
     Reliable: boolean,
 
-    Listener: ((...any) -> ())?,
+    Validate: (...unknown) -> (T...),
+
+    Listener: boolean?,
     Listen: (self: Event<T...>, T...) -> (),
 
     FireClient: (self: Event<T...>, Player: Player, T...) -> (),
@@ -33,13 +37,7 @@ type EventConstructorOptions<T...> = {
     Validate: (...unknown) -> (T...)
 }
 
----- Constants ----
-
----- Variables ----
-
----- Private Functions ----
-
----- Public Functions ----
+---- Functions ----
 
 local function FireClient<T...>(self: Event<T...>, Player: Player, ...: T...)
     assert(RunService:IsServer(), "FireClient can only be called from the server.")
@@ -63,17 +61,31 @@ end
 
 local function Listen<T...>(self: Event<T...>, Listener: (T...) -> ())
     assert(self.Listener == nil, "Listener can only bet set once!")
-    self.Listener = Listener
+    self.Listener = true
+    Protocol.SetListener(self.Identifier, function(...)
+        if pcall(self.Validate, ...) then
+            Listener(...)
+        end
+    end)
 end
 
----- Initialization ----
+---- Constructor ----
 
-local function Constructor<T...>(Options: EventConstructorOptions<T...>): Event
+return function<T...>(Options: EventConstructorOptions<T...>): Event<T...>
     return {
-        
-    }
+        Identifier = Protocol.GetIdentifier(Options.Name),
+        Reliable = not Options.Unreliable,
+        Listener = false,
+
+        Validate = Options.Validate,
+
+        Listen = Listen,
+
+        FireClient = FireClient,
+        FireClients = FireClients,
+        FireAllClients = FireAllClients,
+        FireAllClientsExcept = FireAllClientsExcept,
+
+        FireServer = FireServer
+    } :: any
 end
-
----- Connections ----
-
-return Constructor
