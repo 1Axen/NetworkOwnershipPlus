@@ -27,6 +27,7 @@ function Identifier.GetShared(Name: string): string
         if not Attribute then
             Shared += 1
             Attribute = string.pack("B", Shared)
+            ReliableEvent:SetAttribute(Name, Attribute)
         end
         
         return Attribute

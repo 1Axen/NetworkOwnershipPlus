@@ -57,6 +57,7 @@ end
 local function OnServerHeartbeat()
     for Player, Events in Outgoing do
         if next(Events.Reliable) then
+            print(Player, Events.Reliable)
             ReliableEvent:FireClient(Player, Events.Reliable)
         end
 

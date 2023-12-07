@@ -55,17 +55,17 @@ return function<T..., A...>(Options: FunctionConstructorOptions<T...>): Function
     local self: Function<T..., A...> = {
         Identifier = Identifier.GetShared(Options.Name),
         Reliable = true,
-        Listener = false,
-
-        Validate = Options.Validate,
 
         Listen = Listen,
+        Validate = Options.Validate,
 
         InvokeServer = InvokeServer
     } :: any
 
     if IsServer then
         Protocol.Server.SetListener(self.Identifier, function(Player: Player, InvocationIdentifier: string, ...: any)
+            print(`{Player} -> {InvocationIdentifier}`)
+
             if type(InvocationIdentifier) ~= "string" then
                 return
             end

@@ -22,6 +22,21 @@ local Complex = Network.Event({
     end
 })
 
-Empty:Listen(print)
-Complex:Listen(print)
+local Function = Network.Function({
+    Name = "Function",
+    Validate = function(number)
+        assert(typeof(number) == "number", "Expected number")
+        return number
+    end
+})
+
+Empty:Listen(function()
+    print("Empty event!")
+end)
+
+Complex:Listen(function(string, number, boolean)
+    print(`Complex event: {string} {number} {boolean}`)
+end)
+
+print(Function:InvokeServer(1))
 print(Network.Time.GetSyncedTime())

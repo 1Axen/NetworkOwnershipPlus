@@ -32,7 +32,7 @@ if IsServer then
         RemoteEvent.Parent = ReplicatedStorage
     end
 
-    if ReplicatedStorage:FindFirstChild("UnreliableConnection") then
+    if not ReplicatedStorage:FindFirstChild("UnreliableConnection") then
         local UnreliableRemoteEvent = Instance.new("UnreliableRemoteEvent")
         UnreliableRemoteEvent.Name = "UnreliableConnection"
         UnreliableRemoteEvent.Parent = ReplicatedStorage

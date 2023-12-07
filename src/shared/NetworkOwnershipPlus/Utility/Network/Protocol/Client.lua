@@ -50,6 +50,7 @@ local function OnClientEvent(Events: Events)
     for Identifier, Packets in Events do
         local Listener = Listeners[Identifier]
         if not Listener then
+            print(`{Identifier} has no listener.`)
             continue
         end
 
@@ -61,6 +62,7 @@ end
 
 local function OnClientHeartbeat()
     for _, Packet in Outgoing.Reliable do
+        print(Packet)
         ReliableEvent:FireServer(table.unpack(Packet))
     end
 
@@ -94,16 +96,11 @@ end
 
 function Protocol.InvokeFunction(Identifier: string, InvocationIdentifier: string, ...)
     local Arguments = {...}
-    local Bucket = Outgoing.Reliable
-    if not Bucket[Identifier] then
-        Bucket[Identifier] = {}
-    end
-
-    WasPacketSent = true
+    
     table.insert(Arguments, 1, InvocationIdentifier)
-    table.insert(Bucket[Identifier], Arguments)
-
+    Protocol.SendEvent(Identifier, true, Arguments)
     Invocations[InvocationIdentifier] = coroutine.running()
+
     return coroutine.yield()
 end
 

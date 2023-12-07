@@ -22,8 +22,9 @@ type Event<T...> = {
 
     Validate: (...unknown) -> (T...),
 
-    Listener: ((T...) -> ())?,
-    Listen: (self: Event<T...>, Listener: (T...) -> ()) -> (),
+    Listener: ((...any) -> ())?,
+    SetServerListener: (self: Event<T...>, Listener: (Player, T...) -> ()) -> (),
+    SetClientListener: (self: Event<T...>, Listener: (T...) -> ()) -> (),
 
     FireClient: (self: Event<T...>, Player: Player, T...) -> (),
     FireClients: (self: Event<T...>, Players: {Player}, T...) -> (),
@@ -80,8 +81,15 @@ local function FireServer<T...>(self: Event<T...>, ...: T...)
     Protocol.Client.SendEvent(self.Identifier, self.Reliable, ...)
 end
 
-local function Listen<T...>(self: Event<T...>, Listener: (T...) -> ())
+local function ServerListen<T...>(self: Event<T...>, Listener: (Player, T...) -> ())
     assert(self.Listener == nil, "Listener can only bet set once!")
+    assert(IsServer, "ServerListen can only be called from the client.")
+    self.Listener = Listener :: any
+end
+
+local function ClientListen<T...>(self: Event<T...>, Listener: (T...) -> ())
+    assert(self.Listener == nil, "Listener can only bet set once!")
+    assert(not IsServer, "ClientListen can only be called from the client.")
     self.Listener = Listener
 end
 
@@ -92,8 +100,9 @@ return function<T...>(Options: EventConstructorOptions<T...>): Event<T...>
         Identifier = Identifier.GetShared(Options.Name),
         Reliable = not Options.Unreliable,
         
-        Listen = Listen,
         Validate = Options.Validate,
+        SetServerListener = ServerListen,
+        SetClientListener = ClientListen,
 
         FireClient = FireClient,
         FireClients = FireClients,
